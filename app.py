@@ -60,7 +60,7 @@ def push_to_github(df, filename):
         st.error(f"GitHub 同步錯誤: {e}")
         return False
 
-# --- 3. 爬蟲核心 (你的 MAS 邏輯) ---
+# --- 3. 爬蟲核心 ---
 def fetch_detail(href, s_str, c_str):
     try:
         res = requests.get(BASE_URL + href, headers=headers, timeout=15)
@@ -84,7 +84,6 @@ def run_crawler():
     prog_text = st.empty()
     bar = st.progress(0)
     
-    # 掃描列表
     steps = sum(len(c) for c in sectors_map.values())
     cur = 0
     for s, cats in sectors_map.items():
@@ -109,7 +108,6 @@ def run_crawler():
                                 unique_links[h]["c"].add(c)
             except: pass
 
-    # 詳情抓取
     results = []
     prog_text.text(f"🚀 抓取詳情 ({len(unique_links)} 筆)...")
     with ThreadPoolExecutor(max_workers=10) as exe:
@@ -119,14 +117,13 @@ def run_crawler():
     return pd.DataFrame(results).fillna("")
 
 # --- 4. 主程式介面 ---
-st.title("📱 MAS 金融監控中心")
+st.title("📱 MAS 金融監控")
 
 if st.button("🚀 開始即時掃描並同步 GitHub", use_container_width=True):
     new_df = run_crawler()
     
     if os.path.exists(TARGET_FILE):
         old_df = pd.read_excel(TARGET_FILE).fillna("")
-        # 比對新增
         new_items = new_df[~new_df['連結'].isin(old_df['連結'])]
         
         if not new_items.empty:
@@ -135,17 +132,37 @@ if st.button("🚀 開始即時掃描並同步 GitHub", use_container_width=True
         else:
             st.success("✅ 與現有資料庫一致，無新公司。")
     
-    # 無論有無新資料，都執行同步以確保 GitHub 最新
     with st.spinner("💾 正在將最新結果同步回 GitHub..."):
         if push_to_github(new_df, TARGET_FILE):
             st.toast("GitHub 更新成功！", icon="✅")
         else:
             st.error("GitHub 更新失敗，請檢查 Token 或 Repo 路徑。")
 
+# --- 5. 現有資料搜尋與展示 (放在最底部) ---
 st.divider()
+
 if os.path.exists(TARGET_FILE):
-    df_view = pd.read_excel(TARGET_FILE)
-    st.metric("資料總量", f"{len(df_view)} 筆")
-    q = st.text_input("🔍 搜尋現有資料")
-    if q: df_view = df_view[df_view.astype(str).apply(lambda x: x.str.contains(q, case=False)).any(axis=1)]
-    st.dataframe(df_view.head(30), use_container_width=True)
+    # 讀取並顯示最後更新時間
+    mtime = os.path.getmtime(TARGET_FILE)
+    last_update = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+    
+    df_view = pd.read_excel(TARGET_FILE).fillna("")
+    
+    # 統計資訊列
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("📊 資料總量", f"{len(df_view)} 筆")
+    with col2:
+        st.write(f"📅 最後同步時間")
+        st.caption(last_update)
+
+    # 搜尋功能
+    q = st.text_input("🔍 搜尋現有資料 (名稱、地址、標籤...)")
+    if q:
+        df_view = df_view[df_view.astype(str).apply(lambda x: x.str.contains(q, case=False)).any(axis=1)]
+        st.write(f"找到 {len(df_view)} 筆結果：")
+    
+    # 資料預覽
+    st.dataframe(df_view.head(50), use_container_width=True)
+else:
+    st.info("💡 尚未偵測到本地資料庫，請點擊上方按鈕執行首次掃描。")
